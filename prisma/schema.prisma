@@ -42,5 +42,5 @@ model ChecklistItem {
   taskId    String  @db.Uuid
   task      Task    @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
-  @@index([taskId, position])
+  @@unique([taskId, position])
 }
