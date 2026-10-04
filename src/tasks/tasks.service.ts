@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateTaskDto } from './dto/create-task.dto.js';
+import { UpdateTaskDto } from './dto/update-task.dto.js';
 import { QueryTasksDto, TaskSort } from './dto/query-tasks.dto.js';
 import { Prisma } from '../generated/prisma/client.js';
 
@@ -29,6 +30,7 @@ type TaskWithChecklist = Prisma.TaskGetPayload<{
 const CHECKLIST_ORDER = { orderBy: { position: 'asc' } as const };
 
 const NOT_FOUND_MESSAGE = 'List not found.';
+const TASK_NOT_FOUND_MESSAGE = 'Task not found.';
 
 @Injectable()
 export class TasksService {
@@ -80,6 +82,80 @@ export class TasksService {
     });
 
     return this.toResponse(created);
+  }
+
+  async update(id: string, dto: UpdateTaskDto): Promise<TaskResponse> {
+    const existing = await this.prisma.task.findUnique({
+      where: { id },
+      include: { checklist: CHECKLIST_ORDER },
+    });
+
+    if (!existing) {
+      throw this.notFound();
+    }
+
+    if (dto.listId !== undefined) {
+      await this.assertListExists(dto.listId);
+    }
+
+    const data = this.pickSuppliedFields(dto);
+
+    if (Object.keys(data).length === 0) {
+      return this.toResponse(existing);
+    }
+
+    // Explicit update of only the supplied fields: nothing is read back and
+    // rewritten, so `completed` can never flip by accident.
+    const updated = await this.prisma.task.update({
+      where: { id },
+      data,
+      include: { checklist: CHECKLIST_ORDER },
+    });
+
+    return this.toResponse(updated);
+  }
+
+  async remove(id: string): Promise<{ id: string }> {
+    try {
+      await this.prisma.task.delete({ where: { id } });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw this.notFound();
+      }
+
+      throw error;
+    }
+
+    return { id };
+  }
+
+  private pickSuppliedFields(dto: UpdateTaskDto): Prisma.TaskUncheckedUpdateInput {
+    const data: Prisma.TaskUncheckedUpdateInput = {};
+
+    if (dto.title !== undefined) {
+      data.title = dto.title;
+    }
+    if (dto.description !== undefined) {
+      data.description = dto.description;
+    }
+    if (dto.completed !== undefined) {
+      data.completed = dto.completed;
+    }
+    if (dto.listId !== undefined) {
+      data.listId = dto.listId;
+    }
+
+    return data;
+  }
+
+  private notFound(): NotFoundException {
+    return new NotFoundException({
+      code: 'TASK_NOT_FOUND',
+      message: TASK_NOT_FOUND_MESSAGE,
+    });
   }
 
   private buildWhere(query: QueryTasksDto): Prisma.TaskWhereInput {

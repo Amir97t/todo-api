@@ -53,6 +53,14 @@ describe('tasks (e2e)', () => {
 
     expect(await prisma.task.count()).toBe(0);
     expect(await prisma.checklistItem.count()).toBe(0);
+
+    const orphans = await prisma.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT count(*)::int AS n FROM "Task" t
+       LEFT JOIN "List" l ON l.id = t."listId"
+       WHERE l.id IS NULL`,
+    );
+    expect(orphans[0].n).toBe(0);
+
     expect(
       await prisma.list.findUnique({ where: { id: INBOX_LIST_ID } }),
     ).not.toBeNull();
@@ -587,6 +595,409 @@ describe('tasks (e2e)', () => {
       } finally {
         await dropForcedFailure();
       }
+    });
+  });
+
+  describe('PATCH /api/v1/tasks/:id', () => {
+    it('updates the title', async () => {
+      const list = await createList();
+      const task = await postTask({ title: 'original', listId: list.id }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ title: 'updated' })
+        .expect(200);
+
+      expect(res.body.title).toBe('updated');
+      expect(res.body.id).toBe(task.body.id);
+    });
+
+    it('trims the title', async () => {
+      const list = await createList();
+      const task = await postTask({ title: 'original', listId: list.id }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ title: '   Padded Title   ' })
+        .expect(200);
+
+      expect(res.body.title).toBe('Padded Title');
+    });
+
+    it('returns 400 for a whitespace-only title', async () => {
+      const list = await createList();
+      const task = await postTask({ title: 'original', listId: list.id }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ title: '    ' })
+        .expect(400);
+
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+      expect(res.body.message.join(' ')).toContain('title');
+    });
+
+    it('updates the description and trims it', async () => {
+      const list = await createList();
+      const task = await postTask({ title: 'original', listId: list.id }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ description: '   new details   ' })
+        .expect(200);
+
+      expect(res.body.description).toBe('new details');
+    });
+
+    it('preserves the description when it is omitted', async () => {
+      const list = await createList();
+      const task = await postTask({
+        title: 'original',
+        description: 'keep me',
+        listId: list.id,
+      }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ title: 'renamed only' })
+        .expect(200);
+
+      expect(res.body.description).toBe('keep me');
+    });
+
+    it('normalises an explicit null description to ""', async () => {
+      const list = await createList();
+      const task = await postTask({
+        title: 'original',
+        description: 'will be cleared',
+        listId: list.id,
+      }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ description: null })
+        .expect(200);
+
+      expect(res.body.description).toBe('');
+
+      const fetched = await api().get('/api/v1/tasks').expect(200);
+      const found = fetched.body.find((t: { id: string }) => t.id === task.body.id);
+      expect(found.description).toBe('');
+    });
+
+    it('updates completed to true', async () => {
+      const list = await createList();
+      const task = await postTask({ title: 'original', listId: list.id }).expect(201);
+      expect(task.body.completed).toBe(false);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ completed: true })
+        .expect(200);
+
+      expect(res.body.completed).toBe(true);
+    });
+
+    it('updates completed to false', async () => {
+      const list = await createList();
+      const task = await postTask({
+        title: 'original',
+        completed: true,
+        listId: list.id,
+      }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ completed: false })
+        .expect(200);
+
+      expect(res.body.completed).toBe(false);
+    });
+
+    it('does not toggle: sending the current value changes nothing', async () => {
+      const list = await createList();
+      const task = await postTask({
+        title: 'original',
+        completed: false,
+        listId: list.id,
+      }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ completed: false })
+        .expect(200);
+
+      expect(res.body.completed).toBe(false);
+    });
+
+    it('is idempotent when repeating the same completed value', async () => {
+      const list = await createList();
+      const task = await postTask({
+        title: 'original',
+        completed: false,
+        listId: list.id,
+      }).expect(201);
+
+      const first = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ completed: true })
+        .expect(200);
+      const second = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ completed: true })
+        .expect(200);
+      const third = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ completed: true })
+        .expect(200);
+
+      expect(first.body.completed).toBe(true);
+      expect(second.body.completed).toBe(true);
+      expect(third.body.completed).toBe(true);
+      expect(second.body.title).toBe(first.body.title);
+    });
+
+    it('moves the task to another list', async () => {
+      const from = await createList();
+      const to = await createList();
+      const task = await postTask({ title: 'mover', listId: from.id }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ listId: to.id })
+        .expect(200);
+
+      expect(res.body.listId).toBe(to.id);
+
+      const moved = await api()
+        .get(`/api/v1/tasks?listId=${to.id}`)
+        .expect(200);
+      expect(moved.body.map((t: { id: string }) => t.id)).toContain(task.body.id);
+
+      const left = await api()
+        .get(`/api/v1/tasks?listId=${from.id}`)
+        .expect(200);
+      expect(left.body.map((t: { id: string }) => t.id)).not.toContain(task.body.id);
+    });
+
+    it('accepts the Inbox as a target list', async () => {
+      const list = await createList();
+      const task = await postTask({ title: 'to inbox', listId: list.id }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ listId: INBOX_LIST_ID })
+        .expect(200);
+
+      expect(res.body.listId).toBe(INBOX_LIST_ID);
+    });
+
+    it('returns 400 for an invalid task UUID', async () => {
+      const res = await api()
+        .patch('/api/v1/tasks/not-a-uuid')
+        .send({ title: 'x' })
+        .expect(400);
+
+      expect(res.body.statusCode).toBe(400);
+    });
+
+    it('returns 404 TASK_NOT_FOUND for a missing task', async () => {
+      const res = await api()
+        .patch(`/api/v1/tasks/${randomUUID()}`)
+        .send({ title: 'ghost' })
+        .expect(404);
+
+      expect(res.body.code).toBe('TASK_NOT_FOUND');
+    });
+
+    it('returns 400 for an invalid target list UUID', async () => {
+      const list = await createList();
+      const task = await postTask({ title: 'original', listId: list.id }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ listId: 'nope' })
+        .expect(400);
+
+      expect(res.body.statusCode).toBe(400);
+    });
+
+    it('returns 404 LIST_NOT_FOUND for a missing target list', async () => {
+      const list = await createList();
+      const task = await postTask({ title: 'original', listId: list.id }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ listId: randomUUID() })
+        .expect(404);
+
+      expect(res.body.code).toBe('LIST_NOT_FOUND');
+    });
+
+    it('returns 400 for an unknown body field', async () => {
+      const list = await createList();
+      const task = await postTask({ title: 'original', listId: list.id }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ colour: 'red' })
+        .expect(400);
+
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+      expect(res.body.message.join(' ')).toContain('colour');
+    });
+
+    it('rejects checklist as an unknown field', async () => {
+      const list = await createList();
+      const task = await postTask({
+        title: 'original',
+        listId: list.id,
+        checklist: [{ text: 'existing' }],
+      }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ checklist: [{ text: 'sneaky' }] })
+        .expect(400);
+
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+      expect(res.body.message.join(' ')).toContain('checklist');
+    });
+
+    it('preserves omitted fields during a partial update', async () => {
+      const list = await createList();
+      const task = await postTask({
+        title: 'keep title',
+        description: 'keep description',
+        completed: true,
+        listId: list.id,
+      }).expect(201);
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ title: 'changed title' })
+        .expect(200);
+
+      expect(res.body.title).toBe('changed title');
+      expect(res.body.description).toBe('keep description');
+      expect(res.body.completed).toBe(true);
+      expect(res.body.listId).toBe(list.id);
+      expect(res.body.createdAt).toBe(task.body.createdAt);
+    });
+
+    it('returns the same representation as GET', async () => {
+      const list = await createList();
+      const task = await postTask({
+        title: 'original',
+        listId: list.id,
+        checklist: [{ text: 'one' }, { text: 'two' }],
+      }).expect(201);
+
+      const patched = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ title: 'patched' })
+        .expect(200);
+
+      expectTaskShape(patched.body);
+      expect(Object.keys(patched.body).sort()).toEqual(TASK_KEYS);
+
+      const fetched = await api().get('/api/v1/tasks').expect(200);
+      const same = fetched.body.find((t: { id: string }) => t.id === task.body.id);
+
+      expect(patched.body).toEqual(same);
+      expect(
+        patched.body.checklist.map((c: { position: number }) => c.position),
+      ).toEqual([0, 1]);
+    });
+
+    it('leaves the checklist intact after a normal task PATCH', async () => {
+      const list = await createList();
+      const task = await postTask({
+        title: 'original',
+        listId: list.id,
+        checklist: [{ text: 'first' }, { text: 'second' }],
+      }).expect(201);
+      const before = task.body.checklist;
+
+      const res = await api()
+        .patch(`/api/v1/tasks/${task.body.id}`)
+        .send({ title: 'renamed', completed: true })
+        .expect(200);
+
+      expect(res.body.checklist).toEqual(before);
+
+      const rows = await prisma.checklistItem.findMany({
+        where: { taskId: task.body.id },
+        orderBy: { position: 'asc' },
+      });
+      expect(rows.map((r) => r.text)).toEqual(['first', 'second']);
+    });
+  });
+
+  describe('DELETE /api/v1/tasks/:id', () => {
+    it('deletes a task and returns its id', async () => {
+      const list = await createList();
+      const task = await postTask({ title: 'to delete', listId: list.id }).expect(201);
+
+      const res = await api()
+        .delete(`/api/v1/tasks/${task.body.id}`)
+        .expect(200);
+
+      expect(res.body).toEqual({ id: task.body.id });
+      expect(Object.keys(res.body)).toEqual(['id']);
+
+      expect(
+        await prisma.task.findUnique({ where: { id: task.body.id } }),
+      ).toBeNull();
+    });
+
+    it('removes checklist items through the database cascade', async () => {
+      const list = await createList();
+      const task = await postTask({
+        title: 'with checklist',
+        listId: list.id,
+        checklist: [{ text: 'a' }, { text: 'b' }, { text: 'c' }],
+      }).expect(201);
+
+      const itemsBefore = await prisma.checklistItem.count({
+        where: { taskId: task.body.id },
+      });
+      expect(itemsBefore).toBe(3);
+
+      await api().delete(`/api/v1/tasks/${task.body.id}`).expect(200);
+
+      expect(
+        await prisma.checklistItem.count({ where: { taskId: task.body.id } }),
+      ).toBe(0);
+      expect(
+        await prisma.task.findUnique({ where: { id: task.body.id } }),
+      ).toBeNull();
+    });
+
+    it('returns 404 TASK_NOT_FOUND for a missing task', async () => {
+      const res = await api()
+        .delete(`/api/v1/tasks/${randomUUID()}`)
+        .expect(404);
+
+      expect(res.body.code).toBe('TASK_NOT_FOUND');
+    });
+
+    it('returns 400 for an invalid task UUID', async () => {
+      const res = await api().delete('/api/v1/tasks/nope').expect(400);
+
+      expect(res.body.statusCode).toBe(400);
+    });
+
+    it('does not leave the task queryable after deletion', async () => {
+      const list = await createList();
+      const task = await postTask({ title: 'vanish', listId: list.id }).expect(201);
+
+      await api().delete(`/api/v1/tasks/${task.body.id}`).expect(200);
+
+      const remaining = await api().get('/api/v1/tasks').expect(200);
+      expect(remaining.body.map((t: { id: string }) => t.id)).not.toContain(
+        task.body.id,
+      );
     });
   });
 
