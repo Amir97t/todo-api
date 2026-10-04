@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import { GlobalExceptionFilter } from './app/filters/global-exception.filter.js';
 import { HealthModule } from './health/health.module.js';
+import { ListsModule } from './lists/lists.module.js';
 
 @Module({
   imports: [
@@ -11,6 +12,7 @@ import { HealthModule } from './health/health.module.js';
       envFilePath: ['.env'],
     }),
     HealthModule,
+    ListsModule,
   ],
   providers: [
     {

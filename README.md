@@ -25,6 +25,81 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## API
+
+Every route is served under the `/api/v1` prefix (`GET /health` is not a
+route — health lives at `GET /api/v1/health`).
+
+Errors share one shape:
+
+```json
+{ "statusCode": 404, "code": "LIST_NOT_FOUND", "message": "List not found.", "error": "Not Found" }
+```
+
+### Lists
+
+| Method   | Path                                          | Description                    |
+| -------- | --------------------------------------------- | ------------------------------ |
+| `GET`    | `/api/v1/lists`                               | All lists, as a bare array     |
+| `POST`   | `/api/v1/lists`                               | Create a list                  |
+| `PATCH`  | `/api/v1/lists/:id`                           | Update `name` and/or `icon`    |
+| `DELETE` | `/api/v1/lists/:id?strategy=relocate\|delete` | Delete a list (default `relocate`) |
+
+`GET /api/v1/lists` returns the system Inbox first, then custom lists in
+creation order. Only these fields are exposed:
+
+```json
+{
+  "id": "00000000-0000-4000-8000-000000000001",
+  "name": "Inbox",
+  "icon": "inbox",
+  "createdAt": "2026-10-04T09:47:20.000Z",
+  "updatedAt": "2026-10-04T09:47:20.000Z"
+}
+```
+
+The Inbox is always returned under its real UUID — there is no `"inbox"`
+alias.
+
+#### Create
+
+```json
+{ "name": " Work ", "icon": "briefcase" }
+```
+
+- `name` is trimmed before validation; an empty or whitespace-only name is `400`.
+- Duplicate names are rejected case-insensitively with `409 LIST_NAME_EXISTS`.
+- `icon` is optional and must be one of the frontend `LIST_ICON_OPTIONS`
+  values or `inbox`.
+- The id is generated server-side; success is `201` with the created list.
+
+#### Update
+
+A partial body of `name` and/or `icon`, with the same trim, uniqueness and
+icon rules. Uniqueness excludes the list being updated, so renaming a list to
+its own normalised name succeeds. A missing list is `404 LIST_NOT_FOUND`.
+
+The system Inbox is immutable: any `name` or `icon` change returns
+`403 INBOX_IMMUTABLE`.
+
+#### Delete
+
+`strategy` defaults to `relocate` and must be `relocate` or `delete`
+(`400` otherwise).
+
+- `relocate` — moves every task in the list to the Inbox, then deletes the list.
+- `delete` — deletes every task in the list (checklist items follow via
+  cascade), then deletes the list.
+
+Both run in one transaction and return:
+
+```json
+{ "id": "<deleted uuid>", "strategy": "relocate", "tasksAffected": 3 }
+```
+
+A missing list is `404 LIST_NOT_FOUND`. Deleting the Inbox is
+`403 INBOX_IMMUTABLE`.
+
 ## Project setup
 
 ```bash

@@ -85,6 +85,8 @@ describe('migration (e2e)', () => {
   });
 
   it('rejects a second list differing only by case', async () => {
+    const before = await prisma.list.count();
+
     await expect(
       prisma.$transaction(async (tx) => {
         await tx.list.create({ data: { name: 'Work' } });
@@ -92,11 +94,12 @@ describe('migration (e2e)', () => {
       }),
     ).rejects.toMatchObject({ code: 'P2002' });
 
-    const count = await prisma.list.count();
-    expect(count).toBe(1);
+    expect(await prisma.list.count()).toBe(before);
   });
 
   it('treats surrounding whitespace as distinct until trimmed by the API', async () => {
+    const before = await prisma.list.count();
+
     const created = await prisma.list.create({
       data: { name: 'Work', icon: 'folder' },
     });
@@ -111,7 +114,7 @@ describe('migration (e2e)', () => {
     await prisma.list.delete({ where: { id: created.id } });
     await prisma.list.delete({ where: { id: spaced.id } });
 
-    expect(await prisma.list.count()).toBe(1);
+    expect(await prisma.list.count()).toBe(before);
   });
 
   it('keeps RESTRICT on Task.delete and CASCADE on ChecklistItem.delete', async () => {
