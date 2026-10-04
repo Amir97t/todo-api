@@ -4,6 +4,7 @@ import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import { GlobalExceptionFilter } from './app/filters/global-exception.filter.js';
 import { HealthModule } from './health/health.module.js';
 import { ListsModule } from './lists/lists.module.js';
+import { TasksModule } from './tasks/tasks.module.js';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { ListsModule } from './lists/lists.module.js';
     }),
     HealthModule,
     ListsModule,
+    TasksModule,
   ],
   providers: [
     {
