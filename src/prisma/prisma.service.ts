@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../generated/prisma/client.js';
+import { INBOX_LIST_ID } from '../common/inbox.constant.js';
 
 @Injectable()
 export class PrismaService
@@ -42,7 +43,29 @@ export class PrismaService
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      return;
     }
+
+    await this.assertInboxExists();
+  }
+
+  private async assertInboxExists(): Promise<void> {
+    const inbox = await this.list.findUnique({
+      where: { id: INBOX_LIST_ID },
+    });
+
+    if (inbox) {
+      this.logger.log(`Inbox system row present (${INBOX_LIST_ID})`);
+      return;
+    }
+
+    const message = [
+      `The Inbox system row (${INBOX_LIST_ID}) does not exist in "List".`,
+      'The application cannot start without it; run pending migrations with `npx prisma migrate deploy`.',
+    ].join(' ');
+
+    this.logger.error(message);
+    throw new Error(message);
   }
 
   async onModuleDestroy(): Promise<void> {

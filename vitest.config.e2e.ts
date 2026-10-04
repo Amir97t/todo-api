@@ -7,5 +7,9 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.e2e-spec.ts'],
+    // Each suite boots a Nest app and a Prisma client; parallel workers can
+    // push module init past vitest's 10s default.
+    hookTimeout: 30_000,
+    testTimeout: 30_000,
   },
 });
