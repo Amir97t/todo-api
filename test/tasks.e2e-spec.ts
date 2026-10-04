@@ -596,6 +596,108 @@ describe('tasks (e2e)', () => {
         await dropForcedFailure();
       }
     });
+
+    it('preserves a supplied ISO createdAt', async () => {
+      const list = await createList();
+
+      const res = await postTask({
+        title: 'stamped',
+        listId: list.id,
+        createdAt: '2026-03-15T10:30:00.000Z',
+      }).expect(201);
+
+      expect(res.body.createdAt).toBe('2026-03-15T10:30:00.000Z');
+
+      const fetched = await api().get('/api/v1/tasks').expect(200);
+      const found = fetched.body.find((t: { id: string }) => t.id === res.body.id);
+      expect(found.createdAt).toBe('2026-03-15T10:30:00.000Z');
+    });
+
+    it('returns 400 for an invalid createdAt', async () => {
+      const list = await createList();
+
+      const res = await postTask({
+        title: 'bad date',
+        listId: list.id,
+        createdAt: 'not-a-date',
+      }).expect(400);
+
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+      expect(res.body.message.join(' ')).toContain('createdAt');
+    });
+
+    it('rejects epoch-millisecond createdAt values', async () => {
+      const list = await createList();
+
+      const numeric = await postTask({
+        title: 'epoch as number',
+        listId: list.id,
+        createdAt: 1728000000000,
+      }).expect(400);
+      expect(numeric.body.code).toBe('VALIDATION_ERROR');
+      expect(numeric.body.message.join(' ')).toContain('createdAt');
+
+      const asString = await postTask({
+        title: 'epoch as string',
+        listId: list.id,
+        createdAt: '1728000000000',
+      }).expect(400);
+      expect(asString.body.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('generates createdAt when omitted', async () => {
+      const list = await createList();
+
+      const res = await postTask({
+        title: 'default stamp',
+        listId: list.id,
+      }).expect(201);
+
+      expect(typeof res.body.createdAt).toBe('string');
+      expect(Math.abs(Date.now() - Date.parse(res.body.createdAt))).toBeLessThan(
+        60_000,
+      );
+    });
+
+    it('preserves task ordering from supplied createdAt values', async () => {
+      const list = await createList();
+
+      // Deliberately out of order, the way a localStorage migration would
+      // replay rows whose original timestamps must not be flattened.
+      await postTask({
+        title: 'mid',
+        listId: list.id,
+        createdAt: '2026-01-02T00:00:00.000Z',
+      }).expect(201);
+      await postTask({
+        title: 'newest',
+        listId: list.id,
+        createdAt: '2026-01-03T00:00:00.000Z',
+      }).expect(201);
+      await postTask({
+        title: 'oldest',
+        listId: list.id,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }).expect(201);
+
+      const oldest = await api()
+        .get(`/api/v1/tasks?listId=${list.id}&sort=oldest`)
+        .expect(200);
+      expect(oldest.body.map((t: { title: string }) => t.title)).toEqual([
+        'oldest',
+        'mid',
+        'newest',
+      ]);
+
+      const newest = await api()
+        .get(`/api/v1/tasks?listId=${list.id}&sort=newest`)
+        .expect(200);
+      expect(newest.body.map((t: { title: string }) => t.title)).toEqual([
+        'newest',
+        'mid',
+        'oldest',
+      ]);
+    });
   });
 
   describe('PATCH /api/v1/tasks/:id', () => {

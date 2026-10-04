@@ -54,6 +54,8 @@ export class TasksService {
     const description = dto.description ?? '';
     const completed = dto.completed ?? false;
     const checklist = dto.checklist ?? [];
+    // undefined (or null) falls back to the column's now() default.
+    const createdAt = dto.createdAt ? new Date(dto.createdAt) : undefined;
 
     const created = await this.prisma.$transaction(async (tx) => {
       const task = await tx.task.create({
@@ -62,6 +64,7 @@ export class TasksService {
           description,
           completed,
           listId: dto.listId,
+          createdAt,
         },
       });
 

@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsDateString,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -28,6 +29,12 @@ export class CreateTaskDto {
 
   @IsUUID()
   listId!: string;
+
+  // ISO-8601 only. Epoch-millisecond numbers and numeric strings are rejected
+  // so legacy timestamps must be converted by the caller before sending.
+  @IsOptional()
+  @IsDateString()
+  createdAt?: string;
 
   @IsOptional()
   @IsArray()
