@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { ChecklistItemResponse } from './tasks.service.js';
 import { CreateChecklistItemDto } from './dto/create-checklist-item.dto.js';
@@ -9,7 +9,7 @@ const ITEM_NOT_FOUND = 'Checklist item not found.';
 
 @Injectable()
 export class ChecklistService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async create(
     taskId: string,

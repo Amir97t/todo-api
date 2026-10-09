@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -21,7 +22,7 @@ const DEFAULT_STRATEGY: DeleteStrategy = 'relocate';
 
 @Controller('lists')
 export class ListsController {
-  constructor(private readonly lists: ListsService) {}
+  constructor(@Inject(ListsService) private readonly lists: ListsService) {}
 
   @Get()
   findAll(): Promise<ListResponse[]> {

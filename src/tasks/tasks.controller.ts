@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -16,7 +17,7 @@ import { QueryTasksDto } from './dto/query-tasks.dto.js';
 
 @Controller('tasks')
 export class TasksController {
-  constructor(private readonly tasks: TasksService) {}
+  constructor(@Inject(TasksService) private readonly tasks: TasksService) {}
 
   @Get()
   findAll(@Query() query: QueryTasksDto): Promise<TaskResponse[]> {

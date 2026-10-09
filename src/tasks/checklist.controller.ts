@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -14,7 +15,7 @@ import { UpdateChecklistItemDto } from './dto/update-checklist-item.dto.js';
 
 @Controller('tasks/:taskId/checklist')
 export class ChecklistController {
-  constructor(private readonly checklist: ChecklistService) {}
+  constructor(@Inject(ChecklistService) private readonly checklist: ChecklistService) {}
 
   @Post()
   create(

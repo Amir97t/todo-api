@@ -32,4 +32,6 @@ coverage/
 .DS_Store
 Thumbs.db
 
+.vercel/
+
 # Keep Prisma migrations in version control (prisma/migrations/).

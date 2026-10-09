@@ -1,6 +1,7 @@
 import {
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -35,7 +36,7 @@ const NAME_EXISTS_MESSAGE = 'A list with that name already exists.';
 
 @Injectable()
 export class ListsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async findAll(): Promise<ListResponse[]> {
     const lists = await this.prisma.list.findMany({
