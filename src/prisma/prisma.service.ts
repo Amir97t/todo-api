@@ -31,7 +31,11 @@ export class PrismaService
       );
     }
 
-    super({ adapter: new PrismaPg(databaseUrl) });
+    super({
+      adapter: new PrismaPg({
+        connectionString: databaseUrl,
+      }),
+    });
   }
 
   async onModuleInit(): Promise<void> {
