@@ -39,6 +39,12 @@ export class PrismaService
   }
 
   async onModuleInit(): Promise<void> {
+    // Diagnostic bypass: skip Prisma startup checks when SKIP_PRISMA_INIT=true
+    if (process.env.SKIP_PRISMA_INIT === 'true') {
+      this.logger.warn('[DIAGNOSTIC] Skipping Prisma startup checks (SKIP_PRISMA_INIT=true)');
+      return;
+    }
+
     try {
       await this.$queryRaw`SELECT 1`;
       this.logger.log('Connected to PostgreSQL');
