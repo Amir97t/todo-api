@@ -1,6 +1,6 @@
 # Project Status
 
-_Last verified: 2026-10-12_
+_Last verified: 2026-10-11 to 2026-10-12 (Iran time; approximately 23:00–00:00)_
 
 ## Project
 
