@@ -38,10 +38,15 @@ export class TasksService {
 
   async findAll(query: QueryTasksDto): Promise<TaskResponse[]> {
     const where = this.buildWhere(query);
+    const sort = query.sort ?? 'newest';
+
+    if (sort === 'az' || sort === 'za') {
+      return this.findAllByTitle(where, sort);
+    }
 
     const tasks = await this.prisma.task.findMany({
       where,
-      orderBy: this.orderBy(query.sort ?? 'newest'),
+      orderBy: this.orderBy(sort),
       include: { checklist: CHECKLIST_ORDER },
     });
 
@@ -184,18 +189,64 @@ export class TasksService {
     return where;
   }
 
-  private orderBy(sort: TaskSort): Prisma.TaskOrderByWithRelationInput[] {
+  private orderBy(
+    sort: Exclude<TaskSort, 'az' | 'za'>,
+  ): Prisma.TaskOrderByWithRelationInput[] {
     switch (sort) {
       case 'oldest':
         return [{ createdAt: 'asc' }, { id: 'asc' }];
-      case 'az':
-        return [{ title: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }];
-      case 'za':
-        return [{ title: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }];
       case 'newest':
       default:
         return [{ createdAt: 'desc' }, { id: 'desc' }];
     }
+  }
+
+  /**
+   * Case-insensitive title ordering. Prisma's orderBy on this schema only
+   * accepts a plain 'asc'/'desc' for `title`, so the ordering runs as a
+   * parameterized raw query on LOWER("title") and the matching rows are then
+   * hydrated through the regular findMany/include/toResponse path.
+   */
+  private async findAllByTitle(
+    where: Prisma.TaskWhereInput,
+    sort: 'az' | 'za',
+  ): Promise<TaskResponse[]> {
+    const matching = await this.prisma.task.findMany({
+      where,
+      select: { id: true },
+    });
+
+    if (matching.length === 0) {
+      return [];
+    }
+
+    const ids = matching.map((task) => task.id);
+
+    // Two static query branches: the request's sort value only selects the
+    // branch and is never interpolated into SQL. Ids are parameterized.
+    const ordered =
+      sort === 'az'
+        ? await this.prisma.$queryRaw<{ id: string }[]>`
+            SELECT "id" FROM "Task"
+            WHERE "id" IN (${Prisma.join(ids)})
+            ORDER BY LOWER("title") ASC, "createdAt" ASC, "id" ASC
+          `
+        : await this.prisma.$queryRaw<{ id: string }[]>`
+            SELECT "id" FROM "Task"
+            WHERE "id" IN (${Prisma.join(ids)})
+            ORDER BY LOWER("title") DESC, "createdAt" ASC, "id" ASC
+          `;
+
+    const tasks = await this.prisma.task.findMany({
+      where: { id: { in: ids } },
+      include: { checklist: CHECKLIST_ORDER },
+    });
+    const byId = new Map(tasks.map((task) => [task.id, task]));
+
+    return ordered
+      .map(({ id }) => byId.get(id))
+      .filter((task): task is TaskWithChecklist => task !== undefined)
+      .map((task) => this.toResponse(task));
   }
 
   private async assertListExists(listId: string): Promise<void> {
