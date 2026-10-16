@@ -10,6 +10,14 @@ export function getCorsOrigins(): string[] {
 }
 
 export function configureApp(app: INestApplication): INestApplication {
+  // Trust exactly one proxy hop (the Vercel edge in Production, the local
+  // server locally). This makes Express `req.ip` apply its
+  // rightmost-untrusted-hop parse of X-Forwarded-For — the spoof-resistant
+  // way to obtain the client IP for rate-limit bucketing. Never parse
+  // X-Forwarded-For by hand. `trust proxy` is an Express setting, so it is
+  // set on the underlying Express instance via the HTTP adapter.
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
   app.setGlobalPrefix('api/v1');
 
   app.enableCors({
