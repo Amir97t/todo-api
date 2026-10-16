@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { ResourceScope } from '../common/resource-scope.js';
 import { CreateTaskDto } from './dto/create-task.dto.js';
 import { UpdateTaskDto } from './dto/update-task.dto.js';
 import { QueryTasksDto, TaskSort } from './dto/query-tasks.dto.js';
@@ -36,8 +37,8 @@ const TASK_NOT_FOUND_MESSAGE = 'Task not found.';
 export class TasksService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async findAll(query: QueryTasksDto): Promise<TaskResponse[]> {
-    const where = this.buildWhere(query);
+  async findAll(scope: ResourceScope, query: QueryTasksDto): Promise<TaskResponse[]> {
+    const where = this.buildWhere(scope, query);
     const sort = query.sort ?? 'newest';
 
     if (sort === 'az' || sort === 'za') {
@@ -53,8 +54,8 @@ export class TasksService {
     return tasks.map((task) => this.toResponse(task));
   }
 
-  async create(dto: CreateTaskDto): Promise<TaskResponse> {
-    await this.assertListExists(dto.listId);
+  async create(scope: ResourceScope, dto: CreateTaskDto): Promise<TaskResponse> {
+    await this.assertListExists(scope, dto.listId);
 
     const description = dto.description ?? '';
     const completed = dto.completed ?? false;
@@ -92,18 +93,19 @@ export class TasksService {
     return this.toResponse(created);
   }
 
-  async update(id: string, dto: UpdateTaskDto): Promise<TaskResponse> {
-    const existing = await this.prisma.task.findUnique({
-      where: { id },
-      include: { checklist: CHECKLIST_ORDER },
-    });
+  async update(
+    scope: ResourceScope,
+    id: string,
+    dto: UpdateTaskDto,
+  ): Promise<TaskResponse> {
+    const existing = await this.findScoped(scope, id);
 
     if (!existing) {
       throw this.notFound();
     }
 
     if (dto.listId !== undefined) {
-      await this.assertListExists(dto.listId);
+      await this.assertListExists(scope, dto.listId);
     }
 
     const data = this.pickSuppliedFields(dto);
@@ -123,7 +125,13 @@ export class TasksService {
     return this.toResponse(updated);
   }
 
-  async remove(id: string): Promise<{ id: string }> {
+  async remove(scope: ResourceScope, id: string): Promise<{ id: string }> {
+    const existing = await this.findScoped(scope, id);
+
+    if (!existing) {
+      throw this.notFound();
+    }
+
     try {
       await this.prisma.task.delete({ where: { id } });
     } catch (error) {
@@ -166,8 +174,14 @@ export class TasksService {
     });
   }
 
-  private buildWhere(query: QueryTasksDto): Prisma.TaskWhereInput {
-    const where: Prisma.TaskWhereInput = {};
+  private ownerId(scope: ResourceScope): string | null {
+    return 'userId' in scope ? scope.userId : null;
+  }
+
+  private buildWhere(scope: ResourceScope, query: QueryTasksDto): Prisma.TaskWhereInput {
+    const where: Prisma.TaskWhereInput = {
+      list: { userId: this.ownerId(scope) },
+    };
 
     if (query.listId !== undefined) {
       where.listId = query.listId;
@@ -249,9 +263,19 @@ export class TasksService {
       .map((task) => this.toResponse(task));
   }
 
-  private async assertListExists(listId: string): Promise<void> {
-    const list = await this.prisma.list.findUnique({
-      where: { id: listId },
+  private async findScoped(
+    scope: ResourceScope,
+    id: string,
+  ): Promise<TaskWithChecklist | null> {
+    return this.prisma.task.findFirst({
+      where: { id, list: { userId: this.ownerId(scope) } },
+      include: { checklist: CHECKLIST_ORDER },
+    });
+  }
+
+  private async assertListExists(scope: ResourceScope, listId: string): Promise<void> {
+    const list = await this.prisma.list.findFirst({
+      where: { id: listId, userId: this.ownerId(scope) },
       select: { id: true },
     });
 

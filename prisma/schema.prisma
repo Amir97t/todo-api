@@ -2,8 +2,9 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
@@ -17,6 +18,7 @@ model User {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   refreshTokens RefreshToken[]
+  lists         List[]
 }
 
 model RefreshToken {
@@ -36,11 +38,26 @@ model RefreshToken {
 
 model List {
   id        String   @id @default(uuid()) @db.Uuid
-  name      String   @unique @db.Citext
+  name      String   @db.Citext
   icon      String?
+  userId    String?  @db.Uuid
+  isInbox   Boolean  @default(false)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   tasks     Task[]
+
+  // Per-user list names; `name` is CITEXT, so this is case-insensitive.
+  @@unique([userId, name])
+
+  // At most one Inbox per user. NULL userId rows are not constrained by
+  // this index (PostgreSQL treats NULLs as distinct in unique indexes);
+  // unowned-list name uniqueness is preserved by the legacy index below.
+  @@unique([userId], map: "List_userId_inbox_key", where: { isInbox: true })
+
+  // Legacy single-user behavior: list names stay globally unique among
+  // unowned lists (userId IS NULL), matching the pre-ownership constraint.
+  @@unique([name], map: "List_name_legacy_key", where: { userId: null })
 }
 
 model Task {
