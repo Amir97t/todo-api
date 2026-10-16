@@ -5,6 +5,7 @@ import { GlobalExceptionFilter } from './app/filters/global-exception.filter.js'
 import { HealthModule } from './health/health.module.js';
 import { ListsModule } from './lists/lists.module.js';
 import { TasksModule } from './tasks/tasks.module.js';
+import { AuthModule } from './auth/auth.module.js';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { TasksModule } from './tasks/tasks.module.js';
       isGlobal: true,
       envFilePath: ['.env'],
     }),
+    AuthModule,
     HealthModule,
     ListsModule,
     TasksModule,
