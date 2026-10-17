@@ -20,6 +20,8 @@ export function configureApp(app: INestApplication): INestApplication {
 
   app.setGlobalPrefix('api/v1');
 
+  // Credentialed refresh-cookie requests are allowed only for the exact
+  // origins shared with the CSRF guard; wildcard origins are never used.
   app.enableCors({
     origin: getCorsOrigins(),
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
