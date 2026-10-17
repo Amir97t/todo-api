@@ -23,7 +23,7 @@ export function configureApp(app: INestApplication): INestApplication {
   app.enableCors({
     origin: getCorsOrigins(),
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    credentials: false,
+    credentials: true,
   });
 
   return app;
