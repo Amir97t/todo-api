@@ -22,7 +22,7 @@ function getCookieBaseOptions(): Pick<CookieOptions, 'httpOnly' | 'sameSite' | '
 function getCsrfCookieBaseOptions(): Pick<CookieOptions, 'httpOnly' | 'sameSite' | 'path'> {
   return {
     httpOnly: false,
-    sameSite: 'lax',
+    sameSite: isProduction() ? 'none' : 'lax',
     path: '/',
   };
 }
