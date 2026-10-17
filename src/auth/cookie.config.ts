@@ -14,7 +14,7 @@ function isProduction(): boolean {
 function getCookieBaseOptions(): Pick<CookieOptions, 'httpOnly' | 'sameSite' | 'path'> {
   return {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: isProduction() ? 'none' : 'lax',
     path: '/api/v1/auth',
   };
 }
