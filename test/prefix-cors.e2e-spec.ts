@@ -66,7 +66,7 @@ describe('prefix and CORS (e2e)', () => {
       expect(res.headers['access-control-allow-origin']).toBe(
         'http://localhost:5173',
       );
-      expect(res.headers['access-control-allow-credentials']).toBeUndefined();
+      expect(res.headers['access-control-allow-credentials']).toBe('true');
     });
 
     it('allows the loopback Vite dev origin', async () => {
