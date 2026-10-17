@@ -90,7 +90,7 @@ describe('AuthController', () => {
           expect(cookies.refreshToken.options).toMatchObject({
             httpOnly: true,
             secure: expectedSecure,
-            sameSite: 'lax',
+            sameSite: envName === 'production' ? 'none' : 'lax',
             path: '/api/v1/auth',
             maxAge: 7 * 24 * 60 * 60 * 1000,
           });
@@ -110,7 +110,7 @@ describe('AuthController', () => {
           expect(cookies.csrfToken.options).toMatchObject({
             httpOnly: false,
             secure: expectedSecure,
-            sameSite: 'lax',
+            sameSite: envName === 'production' ? 'none' : 'lax',
             path: '/',
           });
         });
@@ -129,7 +129,7 @@ describe('AuthController', () => {
           expect(cookies.refreshToken.options).toMatchObject({
             httpOnly: true,
             secure: expectedSecure,
-            sameSite: 'lax',
+            sameSite: envName === 'production' ? 'none' : 'lax',
             path: '/api/v1/auth',
             maxAge: 7 * 24 * 60 * 60 * 1000,
           });
@@ -149,7 +149,7 @@ describe('AuthController', () => {
           expect(cookies.refreshToken.options).toMatchObject({
             httpOnly: true,
             secure: expectedSecure,
-            sameSite: 'lax',
+            sameSite: envName === 'production' ? 'none' : 'lax',
             path: '/api/v1/auth',
             maxAge: 7 * 24 * 60 * 60 * 1000,
           });
@@ -172,13 +172,13 @@ describe('AuthController', () => {
             path: '/api/v1/auth',
             secure: expectedSecure,
             httpOnly: true,
-            sameSite: 'lax',
+            sameSite: envName === 'production' ? 'none' : 'lax',
           });
           expect(cleared.csrfToken).toMatchObject({
             path: '/',
             secure: expectedSecure,
             httpOnly: false,
-            sameSite: 'lax',
+            sameSite: envName === 'production' ? 'none' : 'lax',
           });
           expect(mockAuthService.revokeTokenFamily).toHaveBeenCalledWith('some-token');
         });
