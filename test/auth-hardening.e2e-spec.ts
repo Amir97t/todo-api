@@ -49,6 +49,36 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Remove only accounts created by this suite and their owned resources.
+ * Lists restrict User deletion, so delete tasks and owned lists first;
+ * refresh tokens are removed by the User -> RefreshToken cascade.
+ */
+async function cleanupCreatedUsers(prisma: PrismaService, emails: string[]): Promise<void> {
+  if (emails.length === 0) return;
+
+  await prisma.$transaction(async (tx) => {
+    const users = await tx.user.findMany({
+      where: { email: { in: emails } },
+      select: { id: true },
+    });
+    const userIds = users.map((user) => user.id);
+    if (userIds.length === 0) return;
+
+    const lists = await tx.list.findMany({
+      where: { userId: { in: userIds } },
+      select: { id: true },
+    });
+    const listIds = lists.map((list) => list.id);
+
+    if (listIds.length > 0) {
+      await tx.task.deleteMany({ where: { listId: { in: listIds } } });
+    }
+    await tx.list.deleteMany({ where: { userId: { in: userIds } } });
+    await tx.user.deleteMany({ where: { id: { in: userIds } } });
+  });
+}
+
 describe('Auth hardening (e2e)', () => {
   describe('rate limiting + refresh replay/race (real AuthModule, memory provider)', () => {
     let app: INestApplication;
@@ -119,18 +149,21 @@ describe('Auth hardening (e2e)', () => {
     });
 
     afterAll(async () => {
-      // Clean up DB rows while Prisma is still connected, then tear down.
-      // Guard: if beforeAll failed before app/prisma were assigned, still
-      // restore env so other suites are unaffected.
-      if (prisma) {
-        await prisma.user.deleteMany({ where: { email: { in: createdEmails } } }).catch(() => {});
-      }
-      await app?.close();
-      for (const [key, value] of savedEnv) {
-        if (value === undefined) {
-          delete process.env[key];
-        } else {
-          process.env[key] = value;
+      try {
+        // Prisma is still connected here. Do not swallow cleanup failures:
+        // a failed cleanup must fail the suite instead of leaking test data.
+        if (prisma) {
+          await cleanupCreatedUsers(prisma, createdEmails);
+        }
+      } finally {
+        // Always tear down and restore shared process state, even on failure.
+        await app?.close();
+        for (const [key, value] of savedEnv) {
+          if (value === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = value;
+          }
         }
       }
     });
@@ -213,6 +246,22 @@ describe('Auth hardening (e2e)', () => {
           .expect(200);
 
         expect(res.body.accessToken).toEqual(expect.any(String));
+      });
+
+      it('cleans up a registered test user, owned Inbox, and refresh tokens', async () => {
+        const email = uniqueEmail('cleanup-regression');
+        await registerUser('203.0.113.93', email);
+
+        const user = await prisma.user.findUnique({ where: { email } });
+        expect(user).not.toBeNull();
+        expect(await prisma.list.count({ where: { userId: user!.id } })).toBe(1);
+        expect(await prisma.refreshToken.count({ where: { userId: user!.id } })).toBeGreaterThan(0);
+
+        await cleanupCreatedUsers(prisma, [email]);
+
+        expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+        expect(await prisma.list.count({ where: { userId: user!.id } })).toBe(0);
+        expect(await prisma.refreshToken.count({ where: { userId: user!.id } })).toBe(0);
       });
 
       it('revokes the whole family when a refresh is replayed after rotation', async () => {
