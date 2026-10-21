@@ -42,11 +42,35 @@ describe('migration (e2e)', () => {
     expect(row?.udt_name).toBe('citext');
   });
 
-  it('enforces case-insensitive unique names', async () => {
-    const row = await one<{ indexdef: string }>(
+  it('replaces the global name unique with ownership-scoped uniques', async () => {
+    const legacy = await one<{ indexdef: string }>(
       `SELECT indexdef FROM pg_indexes WHERE indexname = 'List_name_key'`,
     );
+    expect(legacy).toBeUndefined();
+
+    const perUser = await one<{ indexdef: string }>(
+      `SELECT indexdef FROM pg_indexes WHERE indexname = 'List_userId_name_key'`,
+    );
+    expect(perUser?.indexdef).toContain('UNIQUE');
+    expect(perUser?.indexdef).toContain('("userId", name)');
+
+    const legacyScoped = await one<{ indexdef: string }>(
+      `SELECT indexdef FROM pg_indexes WHERE indexname = 'List_name_legacy_key'`,
+    );
+    expect(legacyScoped?.indexdef).toContain('UNIQUE');
+    expect(legacyScoped?.indexdef).toContain('(name)');
+    expect(legacyScoped?.indexdef).toContain('WHERE');
+    expect(legacyScoped?.indexdef).toContain('"userId" IS NULL');
+  });
+
+  it('enforces at most one Inbox per user via a partial unique index', async () => {
+    const row = await one<{ indexdef: string }>(
+      `SELECT indexdef FROM pg_indexes WHERE indexname = 'List_userId_inbox_key'`,
+    );
     expect(row?.indexdef).toContain('UNIQUE');
+    expect(row?.indexdef).toContain('("userId")');
+    expect(row?.indexdef).toContain('WHERE');
+    expect(row?.indexdef).toContain('"isInbox" = true');
   });
 
   it('creates the composite Task index', async () => {

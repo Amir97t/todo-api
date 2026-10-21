@@ -7,6 +7,9 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['**/*.e2e-spec.ts'],
+    // Supply a test-only JWT_SECRET before any suite imports AppModule, so
+    // JwtStrategy can initialise without weakening production startup checks.
+    setupFiles: ['./test/setup-e2e.ts'],
     // Every e2e suite shares one PostgreSQL database, so files must not run
     // concurrently or row-count and uniqueness assertions in one suite race
     // against writes from another.
