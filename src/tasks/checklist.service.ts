@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { ResourceScope } from '../common/resource-scope.js';
 import { ChecklistItemResponse } from './tasks.service.js';
 import { CreateChecklistItemDto } from './dto/create-checklist-item.dto.js';
 import { UpdateChecklistItemDto } from './dto/update-checklist-item.dto.js';
@@ -12,10 +13,11 @@ export class ChecklistService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async create(
+    scope: ResourceScope,
     taskId: string,
     dto: CreateChecklistItemDto,
   ): Promise<ChecklistItemResponse> {
-    await this.assertTaskExists(taskId);
+    await this.assertTaskExists(scope, taskId);
 
     return this.prisma.$transaction(async (tx) => {
       // Serialises appends for this task only, so two concurrent creates
@@ -42,11 +44,12 @@ export class ChecklistService {
   }
 
   async update(
+    scope: ResourceScope,
     taskId: string,
     itemId: string,
     dto: UpdateChecklistItemDto,
   ): Promise<ChecklistItemResponse> {
-    await this.findOwned(taskId, itemId);
+    await this.findOwned(scope, taskId, itemId);
 
     const data: { text?: string; completed?: boolean } = {};
     if (dto.text !== undefined) data.text = dto.text;
@@ -67,8 +70,12 @@ export class ChecklistService {
     return this.toResponse(updated);
   }
 
-  async remove(taskId: string, itemId: string): Promise<{ id: string }> {
-    await this.findOwned(taskId, itemId);
+  async remove(
+    scope: ResourceScope,
+    taskId: string,
+    itemId: string,
+  ): Promise<{ id: string }> {
+    await this.findOwned(scope, taskId, itemId);
 
     await this.prisma.checklistItem.delete({ where: { id: itemId } });
 
@@ -89,9 +96,13 @@ export class ChecklistService {
     };
   }
 
-  private async assertTaskExists(taskId: string): Promise<void> {
-    const task = await this.prisma.task.findUnique({
-      where: { id: taskId },
+  private ownerId(scope: ResourceScope): string | null {
+    return 'userId' in scope ? scope.userId : null;
+  }
+
+  private async assertTaskExists(scope: ResourceScope, taskId: string): Promise<void> {
+    const task = await this.prisma.task.findFirst({
+      where: { id: taskId, list: { userId: this.ownerId(scope) } },
       select: { id: true },
     });
 
@@ -100,8 +111,8 @@ export class ChecklistService {
     }
   }
 
-  private async findOwned(taskId: string, itemId: string) {
-    await this.assertTaskExists(taskId);
+  private async findOwned(scope: ResourceScope, taskId: string, itemId: string) {
+    await this.assertTaskExists(scope, taskId);
 
     const item = await this.prisma.checklistItem.findUnique({
       where: { id: itemId },

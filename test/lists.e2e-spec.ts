@@ -10,7 +10,14 @@ import { INBOX_LIST_ID } from '../src/common/inbox.constant.js';
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const LIST_KEYS = ['createdAt', 'icon', 'id', 'name', 'updatedAt'];
+const LIST_KEYS = [
+  'createdAt',
+  'icon',
+  'id',
+  'isInbox',
+  'name',
+  'updatedAt',
+];
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

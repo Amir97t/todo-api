@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { ResourceScope } from '../common/resource-scope.js';
 import { CreateTaskDto } from './dto/create-task.dto.js';
 import { UpdateTaskDto } from './dto/update-task.dto.js';
 import { QueryTasksDto, TaskSort } from './dto/query-tasks.dto.js';
@@ -36,20 +37,25 @@ const TASK_NOT_FOUND_MESSAGE = 'Task not found.';
 export class TasksService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async findAll(query: QueryTasksDto): Promise<TaskResponse[]> {
-    const where = this.buildWhere(query);
+  async findAll(scope: ResourceScope, query: QueryTasksDto): Promise<TaskResponse[]> {
+    const where = this.buildWhere(scope, query);
+    const sort = query.sort ?? 'newest';
+
+    if (sort === 'az' || sort === 'za') {
+      return this.findAllByTitle(where, sort);
+    }
 
     const tasks = await this.prisma.task.findMany({
       where,
-      orderBy: this.orderBy(query.sort ?? 'newest'),
+      orderBy: this.orderBy(sort),
       include: { checklist: CHECKLIST_ORDER },
     });
 
     return tasks.map((task) => this.toResponse(task));
   }
 
-  async create(dto: CreateTaskDto): Promise<TaskResponse> {
-    await this.assertListExists(dto.listId);
+  async create(scope: ResourceScope, dto: CreateTaskDto): Promise<TaskResponse> {
+    await this.assertListExists(scope, dto.listId);
 
     const description = dto.description ?? '';
     const completed = dto.completed ?? false;
@@ -87,18 +93,19 @@ export class TasksService {
     return this.toResponse(created);
   }
 
-  async update(id: string, dto: UpdateTaskDto): Promise<TaskResponse> {
-    const existing = await this.prisma.task.findUnique({
-      where: { id },
-      include: { checklist: CHECKLIST_ORDER },
-    });
+  async update(
+    scope: ResourceScope,
+    id: string,
+    dto: UpdateTaskDto,
+  ): Promise<TaskResponse> {
+    const existing = await this.findScoped(scope, id);
 
     if (!existing) {
       throw this.notFound();
     }
 
     if (dto.listId !== undefined) {
-      await this.assertListExists(dto.listId);
+      await this.assertListExists(scope, dto.listId);
     }
 
     const data = this.pickSuppliedFields(dto);
@@ -118,7 +125,13 @@ export class TasksService {
     return this.toResponse(updated);
   }
 
-  async remove(id: string): Promise<{ id: string }> {
+  async remove(scope: ResourceScope, id: string): Promise<{ id: string }> {
+    const existing = await this.findScoped(scope, id);
+
+    if (!existing) {
+      throw this.notFound();
+    }
+
     try {
       await this.prisma.task.delete({ where: { id } });
     } catch (error) {
@@ -161,8 +174,14 @@ export class TasksService {
     });
   }
 
-  private buildWhere(query: QueryTasksDto): Prisma.TaskWhereInput {
-    const where: Prisma.TaskWhereInput = {};
+  private ownerId(scope: ResourceScope): string | null {
+    return 'userId' in scope ? scope.userId : null;
+  }
+
+  private buildWhere(scope: ResourceScope, query: QueryTasksDto): Prisma.TaskWhereInput {
+    const where: Prisma.TaskWhereInput = {
+      list: { userId: this.ownerId(scope) },
+    };
 
     if (query.listId !== undefined) {
       where.listId = query.listId;
@@ -184,23 +203,79 @@ export class TasksService {
     return where;
   }
 
-  private orderBy(sort: TaskSort): Prisma.TaskOrderByWithRelationInput[] {
+  private orderBy(
+    sort: Exclude<TaskSort, 'az' | 'za'>,
+  ): Prisma.TaskOrderByWithRelationInput[] {
     switch (sort) {
       case 'oldest':
         return [{ createdAt: 'asc' }, { id: 'asc' }];
-      case 'az':
-        return [{ title: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }];
-      case 'za':
-        return [{ title: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }];
       case 'newest':
       default:
         return [{ createdAt: 'desc' }, { id: 'desc' }];
     }
   }
 
-  private async assertListExists(listId: string): Promise<void> {
-    const list = await this.prisma.list.findUnique({
-      where: { id: listId },
+  /**
+   * Case-insensitive title ordering. Prisma's orderBy on this schema only
+   * accepts a plain 'asc'/'desc' for `title`, so the ordering runs as a
+   * parameterized raw query on LOWER("title") and the matching rows are then
+   * hydrated through the regular findMany/include/toResponse path.
+   */
+  private async findAllByTitle(
+    where: Prisma.TaskWhereInput,
+    sort: 'az' | 'za',
+  ): Promise<TaskResponse[]> {
+    const matching = await this.prisma.task.findMany({
+      where,
+      select: { id: true },
+    });
+
+    if (matching.length === 0) {
+      return [];
+    }
+
+    const ids = matching.map((task) => task.id);
+
+    // Two static query branches: the request's sort value only selects the
+    // branch and is never interpolated into SQL. Ids are parameterized.
+    const ordered =
+      sort === 'az'
+        ? await this.prisma.$queryRaw<{ id: string }[]>`
+            SELECT "id" FROM "Task"
+            WHERE "id" IN (${Prisma.join(ids)})
+            ORDER BY LOWER("title") ASC, "createdAt" ASC, "id" ASC
+          `
+        : await this.prisma.$queryRaw<{ id: string }[]>`
+            SELECT "id" FROM "Task"
+            WHERE "id" IN (${Prisma.join(ids)})
+            ORDER BY LOWER("title") DESC, "createdAt" ASC, "id" ASC
+          `;
+
+    const tasks = await this.prisma.task.findMany({
+      where: { id: { in: ids } },
+      include: { checklist: CHECKLIST_ORDER },
+    });
+    const byId = new Map(tasks.map((task) => [task.id, task]));
+
+    return ordered
+      .map(({ id }) => byId.get(id))
+      .filter((task): task is TaskWithChecklist => task !== undefined)
+      .map((task) => this.toResponse(task));
+  }
+
+  private async findScoped(
+    scope: ResourceScope,
+    id: string,
+  ): Promise<TaskWithChecklist | null> {
+    return this.prisma.task.findFirst({
+      where: { id, list: { userId: this.ownerId(scope) } },
+      include: { checklist: CHECKLIST_ORDER },
+    });
+  }
+
+  private async assertListExists(scope: ResourceScope, listId: string): Promise<void> {
+    const list = await this.prisma.list.findFirst({
+      where: { id: listId, userId: this.ownerId(scope) },
       select: { id: true },
     });
 
