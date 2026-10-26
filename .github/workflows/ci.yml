@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Lint, tests, migrations, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: todo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d todo_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Disposable CI-only database. Never use a Neon or Production URL here.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/todo_test?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/todo_test?schema=public
+      REQUIRE_AUTH: "off"
+      RATE_LIMIT: "off"
+      RATE_LIMIT_PROVIDER: memory
+      CORS_ORIGIN: http://localhost:5173,http://127.0.0.1:5173
+      NODE_OPTIONS: --experimental-require-module
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Apply migrations to disposable PostgreSQL
+        run: npx prisma migrate deploy --config prisma7.config.ts
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run end-to-end tests
+        run: npm run test:e2e
+
+      - name: Build
+        run: npm run build
